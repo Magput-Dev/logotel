@@ -1,0 +1,27 @@
+FROM composer:2.1.14 AS composer
+FROM php:7.4-apache
+
+RUN mkdir -p /usr/share/man/man1
+
+# фиксируем устаревшие репозитории
+RUN echo "deb http://snapshot.debian.org/archive/debian/20230201T000000Z bullseye main contrib non-free" > /etc/apt/sources.list \
+    && echo "deb http://snapshot.debian.org/archive/debian/20230201T000000Z bullseye-updates main contrib non-free" >> /etc/apt/sources.list \
+    && echo "deb http://snapshot.debian.org/archive/debian-security/20230201T000000Z bullseye-security main contrib non-free" >> /etc/apt/sources.list \
+    && echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99no-check-valid
+
+RUN apt-get update && apt-get install -y \
+    libcurl4-gnutls-dev \
+    libmagickwand-dev \
+    libzip-dev \
+    zip \
+    libonig-dev \
+    libgnutls28-dev \
+    libssl-dev \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+# Устанавливаем mongodb расширение
+RUN pecl install mongodb-1.9.2 \
+    && docker-php-ext-enable mongodb
+
+COPY --from=composer /usr/bin/composer /usr/bin/composer

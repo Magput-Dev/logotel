@@ -1,0 +1,191 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Magput\Debug\Yii2\Controllers;
+
+use api\components\Debug\data\CacheDataStorage;
+use api\components\Debug\data\Debug;
+use api\components\Debug\data\RedisDataStorage;
+use Yii;
+use yii\web\Controller;
+use yii\web\NotFoundHttpException;
+use yii\web\Response;
+
+/**
+ * Debugger controller provides browsing over available debug logs.
+ *
+ *
+ * @see    \yii\debug\Panel
+ *
+ * @author Qiang Xue <qiang.xue@gmail.com>
+ * @since  2.0
+ */
+class DefaultController extends Controller
+{
+    /**
+     * {@inheritdoc}
+     */
+    public $layout = '@vendor/yiisoft/yii2-debug/src/views/layouts/main';
+    /**
+     * @var \yii\debug\Module owner module.
+     */
+    public $module;
+    /**
+     * @var array the summary data (e.g. URL, time)
+     */
+    public $summary;
+
+
+    /**
+     * {@inheritdoc}
+     */
+    public function actions()
+    {
+        $actions = [];
+        foreach ($this->module->panels as $panel) {
+            $actions = array_merge($actions, $panel->actions);
+        }
+
+        return $actions;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function beforeAction($action)
+    {
+        Yii::$app->response->format = Response::FORMAT_HTML;
+        return parent::beforeAction($action);
+    }
+
+    public function actionIndex()
+    {
+        ini_set('memory_limit', '512M');
+
+        /** @var CacheDataStorage|RedisDataStorage $dataStorage */
+        $dataStorage = $this->module->getDataStorage();
+        $manifest = $dataStorage->getDataManifest();
+
+        $searchModel = new Debug();
+        $dataProvider = $searchModel->search($_GET, $manifest);
+        $dataProvider->sort->defaultOrder['time'] = SORT_DESC;
+
+        // load latest request
+        $tags = array_keys($manifest);
+        $tag = reset($tags);
+        if ($tag) {
+            $this->loadData($tag);
+        }
+
+        return $this->render('@api/components/Debug/views/default/index', [
+            'panels' => $this->module->panels,
+            'dataProvider' => $dataProvider,
+            'searchModel' => $searchModel,
+            'manifest' => $manifest,
+        ]);
+    }
+
+    /**
+     * @param string|null $tag   debug data tag.
+     * @param string|null $panel debug panel ID.
+     *
+     * @return mixed response.
+     * @throws NotFoundHttpException if debug data not found.
+     * @see \yii\debug\Panel
+     */
+    public function actionView($tag = null, $panel = null)
+    {
+        ini_set('memory_limit', '512M');
+
+        $manifest = $this->module->getDataStorage()->getDataManifest();
+
+        if ($tag === null) {
+            $tags = array_keys($manifest);
+            $tag = reset($tags);
+        }
+        $this->loadData($tag);
+        if (isset($this->module->panels[$panel])) {
+            $activePanel = $this->module->panels[$panel];
+        } else {
+            $activePanel = $this->module->panels[$this->module->defaultPanel];
+        }
+
+        if ($activePanel->hasError()) {
+            Yii::$app->errorHandler->handleException($activePanel->getError());
+        }
+
+        return $this->render('@api/components/Debug/views/default/view', [
+            'tag' => $tag,
+            'summary' => $this->summary,
+            'manifest' => $manifest,
+            'panels' => $this->module->panels,
+            'activePanel' => $activePanel,
+        ]);
+    }
+
+    public function actionToolbar($tag)
+    {
+        $this->loadData($tag, 5);
+
+        return $this->renderPartial('@vendor/yiisoft/yii2-debug/src/views/default/toolbar', [
+            'tag' => $tag,
+            'panels' => $this->module->panels,
+            'position' => 'bottom',
+            'defaultHeight' => $this->module->defaultHeight,
+        ]);
+    }
+
+    /**
+     * Download mail action
+     *
+     * @param string $file
+     * @return \yii\console\Response|Response
+     * @throws NotFoundHttpException
+     */
+    public function actionDownloadMail($file)
+    {
+        $filePath = Yii::getAlias($this->module->panels['mail']->mailPath) . '/' . basename($file);
+
+        if ((mb_strpos($file, '\\') !== false || mb_strpos($file, '/') !== false) || !is_file($filePath)) {
+            throw new NotFoundHttpException('Mail file not found');
+        }
+
+        return Yii::$app->response->sendFile($filePath);
+    }
+
+    /**
+     * @param string $tag      debug data tag.
+     * @param int    $maxRetry maximum numbers of tag retrieval attempts.
+     *
+     * @throws NotFoundHttpException if specified tag not found.
+     */
+    public function loadData(string $tag, $maxRetry = 0)
+    {
+        // retry loading debug data because the debug data is logged in shutdown function
+        // which may be delayed in some environment if xdebug is enabled.
+        // See: https://github.com/yiisoft/yii2/issues/1504
+        for ($retry = 0; $retry <= $maxRetry; ++$retry) {
+            $manifest = $this->module->getDataStorage()->getDataManifest($retry > 0);
+            if (isset($manifest[$tag])) {
+                $data=$this->module->getDataStorage()->getData($tag);
+                $exceptions = isset($data['exceptions'])?$data['exceptions']:[];
+                foreach ($this->module->panels as $id => $panel) {
+                    if (isset($data[$id])) {
+                        $panel->tag = $tag;
+                        $panel->load(json_decode($data[$id], true));
+                    }
+                    if (isset($exceptions[$id])) {
+                        $panel->setError($exceptions[$id]);
+                    }
+                }
+                $this->summary = $data['summary'];
+
+                return;
+            }
+            sleep(1);
+        }
+
+        throw new NotFoundHttpException("Unable to find debug data tagged with '$tag'.");
+    }
+}
