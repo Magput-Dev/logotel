@@ -19,4 +19,4 @@ Yii2 Debug/Tracing компонент с поддержкой **OpenTelemetry** 
 ## Установка
 
 ```bash
-composer require magput/yii2-debug-otel
+composer require magput/logotel

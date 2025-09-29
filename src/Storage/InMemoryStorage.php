@@ -6,8 +6,9 @@ namespace Magput\Debug\Storage;
 
 use Magput\Debug\Contracts\ManifestInterface;
 use Magput\Debug\Contracts\EntryInterface;
+use Magput\Debug\Contracts\StorageInterface;
 
-final class InMemoryStorage
+final class InMemoryStorage implements StorageInterface
 {
     /** @var ManifestInterface[] */
     private array $manifests = [];
