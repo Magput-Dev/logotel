@@ -4,3 +4,4 @@
 .vscode
 # composer vendor dir
 /vendor
+.phpunit.cache
